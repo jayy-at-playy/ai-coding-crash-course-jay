@@ -17,8 +17,8 @@ import { CourseStatusBadge } from "~/components/course-status-badge";
 import { formatRate, formatUsd } from "~/lib/utils";
 
 // ─── Instructor Analytics Dashboard ───
-// All-time enrolments, revenue, completion and progress across every
-// non-draft course the instructor owns. The numbers come from
+// All-time enrolments, revenue, completion, progress and quiz results across
+// every non-draft course the instructor owns. The numbers come from
 // instructorAnalyticsService and are live on every load.
 
 export function meta() {
@@ -76,7 +76,7 @@ export default function InstructorAnalytics({
         </Card>
       ) : (
         <>
-          <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <StatCard
               label="Enrolments"
               value={totals.enrollments.toLocaleString("en-US")}
@@ -90,6 +90,8 @@ export default function InstructorAnalytics({
               label="Average progress"
               value={formatRate(totals.averageProgress)}
             />
+            <StatCard label="Quiz score" value={formatRate(totals.quizScore)} />
+            <StatCard label="Pass rate" value={formatRate(totals.passRate)} />
           </div>
 
           <Card>
@@ -110,6 +112,8 @@ export default function InstructorAnalytics({
                     <th className="pb-2 text-right font-medium">
                       Avg. progress
                     </th>
+                    <th className="pb-2 text-right font-medium">Quiz score</th>
+                    <th className="pb-2 text-right font-medium">Pass rate</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -140,6 +144,12 @@ export default function InstructorAnalytics({
                       <td className="py-3 text-right tabular-nums">
                         {formatRate(course.averageProgress)}
                       </td>
+                      <td className="py-3 text-right tabular-nums">
+                        {formatRate(course.quizScore)}
+                      </td>
+                      <td className="py-3 text-right tabular-nums">
+                        {formatRate(course.passRate)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -169,7 +179,9 @@ export function HydrateFallback() {
       <Skeleton className="mb-6 h-4 w-40" />
       <Skeleton className="mb-2 h-9 w-48" />
       <Skeleton className="mb-8 h-4 w-72" />
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Skeleton className="h-28 w-full" />
+        <Skeleton className="h-28 w-full" />
         <Skeleton className="h-28 w-full" />
         <Skeleton className="h-28 w-full" />
         <Skeleton className="h-28 w-full" />

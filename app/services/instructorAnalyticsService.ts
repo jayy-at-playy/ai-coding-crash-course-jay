@@ -9,6 +9,8 @@ import {
   lessons,
   modules,
   purchases,
+  quizAttempts,
+  quizzes,
 } from "~/db/schema";
 
 // ─── Instructor Analytics Service ───
@@ -35,11 +37,26 @@ export type CourseAnalytics = {
    * A completed enrolment counts as 1. Null with no enrolments.
    */
   averageProgress: number | null;
+  /**
+   * Mean of the course's per-quiz averages of each attempting student's best
+   * score, 0–1. Null with no quizzes or no attempts.
+   */
+  quizScore: number | null;
+  /**
+   * Share of attempted (student, quiz) pairs whose best score is at least the
+   * quiz's pass mark, 0–1. Null with no quizzes or no attempts.
+   */
+  passRate: number | null;
 };
 
 type AnalyticsTotals = Pick<
   CourseAnalytics,
-  "enrollments" | "revenueCents" | "completionRate" | "averageProgress"
+  | "enrollments"
+  | "revenueCents"
+  | "completionRate"
+  | "averageProgress"
+  | "quizScore"
+  | "passRate"
 >;
 
 export type InstructorAnalytics = {
@@ -135,6 +152,56 @@ export function getInstructorAnalytics(
     .groupBy(purchases.courseId)
     .as("revenue_sums");
 
+  // Best score per (quiz, student). Students who never attempted a quiz have
+  // no row, so they drop out of quiz metrics rather than counting as zero.
+  const bestScores = db
+    .select({
+      quizId: quizzes.id,
+      courseId: modules.courseId,
+      // Derived from the score because the stored passed flag is unreliable.
+      isPass:
+        sql<number>`max(${quizAttempts.score}) >= ${quizzes.passingScore}`.as(
+          "best_passed"
+        ),
+      best: sql<number>`max(${quizAttempts.score})`.as("best_score"),
+    })
+    .from(quizAttempts)
+    .innerJoin(quizzes, eq(quizzes.id, quizAttempts.quizId))
+    .innerJoin(lessons, eq(lessons.id, quizzes.lessonId))
+    .innerJoin(modules, eq(modules.id, lessons.moduleId))
+    .where(inArray(modules.courseId, instructorCourseIds))
+    .groupBy(quizzes.id, quizAttempts.userId)
+    .as("best_scores");
+
+  const quizAverages = db
+    .select({
+      courseId: bestScores.courseId,
+      average: sql<number>`avg(${bestScores.best})`.as("quiz_average"),
+      attempted: sql<number>`count(*)`.as("quiz_attempted"),
+      passCount: sql<number>`sum(${bestScores.isPass})`.as("quiz_passed"),
+    })
+    .from(bestScores)
+    .groupBy(bestScores.quizId)
+    .as("quiz_averages");
+
+  // Only quizzes with at least one attempt appear, so quizCount is the
+  // number of averages being meaned.
+  const quizStats = db
+    .select({
+      courseId: quizAverages.courseId,
+      quizCount: sql<number>`count(*)`.as("quiz_count"),
+      averageSum: sql<number>`sum(${quizAverages.average})`.as(
+        "quiz_average_sum"
+      ),
+      attempted: sql<number>`sum(${quizAverages.attempted})`.as(
+        "pairs_attempted"
+      ),
+      passCount: sql<number>`sum(${quizAverages.passCount})`.as("pairs_passed"),
+    })
+    .from(quizAverages)
+    .groupBy(quizAverages.courseId)
+    .as("quiz_stats");
+
   const revenueCents = sql<number>`coalesce(${revenueSums.total}, 0)`;
 
   const rows = db
@@ -146,11 +213,16 @@ export function getInstructorAnalytics(
       enrollments: sql<number>`coalesce(${enrollmentCounts.count}, 0)`,
       completed: sql<number>`coalesce(${enrollmentCounts.completed}, 0)`,
       progressSum: sql<number>`coalesce(${enrollmentCounts.progressSum}, 0)`,
+      quizCount: sql<number>`coalesce(${quizStats.quizCount}, 0)`,
+      quizAverageSum: sql<number>`coalesce(${quizStats.averageSum}, 0)`,
+      pairsAttempted: sql<number>`coalesce(${quizStats.attempted}, 0)`,
+      pairsPassed: sql<number>`coalesce(${quizStats.passCount}, 0)`,
       revenueCents,
     })
     .from(courses)
     .leftJoin(enrollmentCounts, eq(enrollmentCounts.courseId, courses.id))
     .leftJoin(revenueSums, eq(revenueSums.courseId, courses.id))
+    .leftJoin(quizStats, eq(quizStats.courseId, courses.id))
     .where(
       and(
         eq(courses.instructorId, instructorId),
@@ -162,29 +234,55 @@ export function getInstructorAnalytics(
     .orderBy(desc(revenueCents), asc(courses.title))
     .all();
 
-  // Rates in the totals are taken across all enrolments, not averaged over
-  // the per-course rates, so the raw counts are summed first.
-  const sums = rows.reduce(
+  type Counts = Omit<(typeof rows)[number], "id" | "title" | "slug" | "status">;
+
+  // The same ratios serve a course row and the totals, which is what keeps the
+  // totals taken across all enrolments, quizzes and attempts rather than
+  // averaged over the per-course figures.
+  const rates = (counts: Counts) => ({
+    completionRate: rate(counts.completed, counts.enrollments),
+    averageProgress: rate(counts.progressSum, counts.enrollments),
+    quizScore: rate(counts.quizAverageSum, counts.quizCount),
+    passRate: rate(counts.pairsPassed, counts.pairsAttempted),
+  });
+
+  const sums = rows.reduce<Counts>(
     (acc, row) => ({
       enrollments: acc.enrollments + row.enrollments,
       completed: acc.completed + row.completed,
       progressSum: acc.progressSum + row.progressSum,
+      quizCount: acc.quizCount + row.quizCount,
+      quizAverageSum: acc.quizAverageSum + row.quizAverageSum,
+      pairsAttempted: acc.pairsAttempted + row.pairsAttempted,
+      pairsPassed: acc.pairsPassed + row.pairsPassed,
       revenueCents: acc.revenueCents + row.revenueCents,
     }),
-    { enrollments: 0, completed: 0, progressSum: 0, revenueCents: 0 }
+    {
+      enrollments: 0,
+      completed: 0,
+      progressSum: 0,
+      quizCount: 0,
+      quizAverageSum: 0,
+      pairsAttempted: 0,
+      pairsPassed: 0,
+      revenueCents: 0,
+    }
   );
 
   return {
     totals: {
       enrollments: sums.enrollments,
       revenueCents: sums.revenueCents,
-      completionRate: rate(sums.completed, sums.enrollments),
-      averageProgress: rate(sums.progressSum, sums.enrollments),
+      ...rates(sums),
     },
-    courses: rows.map(({ completed, progressSum, ...row }) => ({
-      ...row,
-      completionRate: rate(completed, row.enrollments),
-      averageProgress: rate(progressSum, row.enrollments),
+    courses: rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      slug: row.slug,
+      status: row.status,
+      enrollments: row.enrollments,
+      revenueCents: row.revenueCents,
+      ...rates(row),
     })),
   };
 }

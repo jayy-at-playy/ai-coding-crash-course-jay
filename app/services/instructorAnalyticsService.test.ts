@@ -88,6 +88,31 @@ function createLessons(courseId: number, count: number) {
   );
 }
 
+function createQuiz(courseId: number, passingScore = 0.7) {
+  const [lesson] = createLessons(courseId, 1);
+  return testDb
+    .insert(schema.quizzes)
+    .values({ lessonId: lesson.id, title: "Quiz", passingScore })
+    .returning()
+    .get();
+}
+
+/**
+ * The stored passed flag is unreliable (#4), so tests store the opposite of
+ * the real outcome by default to prove the service ignores it.
+ */
+function attemptQuiz(
+  userId: number,
+  quiz: { id: number; passingScore: number },
+  score: number,
+  passed: boolean = !(score >= quiz.passingScore)
+) {
+  testDb
+    .insert(schema.quizAttempts)
+    .values({ userId, quizId: quiz.id, score, passed })
+    .run();
+}
+
 function recordLessonProgress(
   userId: number,
   lessonId: number,
@@ -120,6 +145,8 @@ describe("instructorAnalyticsService", () => {
         revenueCents: 9800,
         completionRate: 0,
         averageProgress: 0,
+        quizScore: null,
+        passRate: null,
       });
       expect(result.courses).toEqual([
         {
@@ -131,6 +158,8 @@ describe("instructorAnalyticsService", () => {
           revenueCents: 9800,
           completionRate: 0,
           averageProgress: 0,
+          quizScore: null,
+          passRate: null,
         },
       ]);
     });
@@ -183,6 +212,7 @@ describe("instructorAnalyticsService", () => {
       );
       enroll(base.user.id, theirs.id);
       purchase(base.user.id, theirs.id, 7000);
+      attemptQuiz(base.user.id, createQuiz(theirs.id), 1);
       enroll(base.user.id, base.course.id);
       purchase(base.user.id, base.course.id, 3000);
 
@@ -192,6 +222,8 @@ describe("instructorAnalyticsService", () => {
       expect(result.totals).toMatchObject({
         enrollments: 1,
         revenueCents: 3000,
+        quizScore: null,
+        passRate: null,
       });
     });
 
@@ -336,6 +368,88 @@ describe("instructorAnalyticsService", () => {
       expect(result.totals.averageProgress).toBe(0.625);
     });
 
+    it("uses each student's best attempt when they retake a quiz", () => {
+      const quiz = createQuiz(base.course.id);
+      const student2 = createUser();
+      attemptQuiz(base.user.id, quiz, 0.4);
+      attemptQuiz(base.user.id, quiz, 0.9);
+      attemptQuiz(base.user.id, quiz, 0.5);
+      attemptQuiz(student2.id, quiz, 0.6);
+
+      const result = getInstructorAnalytics(base.instructor.id);
+
+      // Best scores 0.9 and 0.6; only the first clears 0.7.
+      expect(result.courses[0].quizScore).toBeCloseTo(0.75);
+      expect(result.courses[0].passRate).toBe(0.5);
+    });
+
+    it("judges a pass against each quiz's own pass mark, not 0.7", () => {
+      const lenient = createQuiz(base.course.id, 0.5);
+      const strict = createQuiz(base.course.id, 0.9);
+      // Passes 0.5 though it would fail 0.7; fails 0.9 though it would pass 0.7.
+      attemptQuiz(base.user.id, lenient, 0.6);
+      attemptQuiz(base.user.id, strict, 0.8);
+
+      const result = getInstructorAnalytics(base.instructor.id);
+
+      expect(result.courses[0].passRate).toBe(0.5);
+    });
+
+    it("passes a score exactly on the pass mark", () => {
+      const quiz = createQuiz(base.course.id, 0.8);
+      attemptQuiz(base.user.id, quiz, 0.8);
+
+      const result = getInstructorAnalytics(base.instructor.id);
+
+      expect(result.courses[0].passRate).toBe(1);
+    });
+
+    it("leaves students who never attempted a quiz out of quiz metrics", () => {
+      const quiz = createQuiz(base.course.id);
+      const idle1 = createUser();
+      const idle2 = createUser();
+      enroll(base.user.id, base.course.id);
+      enroll(idle1.id, base.course.id);
+      enroll(idle2.id, base.course.id);
+      attemptQuiz(base.user.id, quiz, 1);
+
+      const result = getInstructorAnalytics(base.instructor.id);
+
+      expect(result.courses[0]).toMatchObject({ quizScore: 1, passRate: 1 });
+    });
+
+    it("reports null quiz metrics for a course with no quizzes or no attempts", () => {
+      const unattempted = createCourse("unattempted");
+      createQuiz(unattempted.id);
+      enroll(base.user.id, unattempted.id);
+
+      const result = getInstructorAnalytics(base.instructor.id);
+
+      for (const course of result.courses) {
+        expect(course).toMatchObject({ quizScore: null, passRate: null });
+      }
+      expect(result.totals).toMatchObject({ quizScore: null, passRate: null });
+    });
+
+    it("takes total quiz score across quizzes and pass rate across attempts", () => {
+      const other = createCourse("other");
+      const [s1, s2, s3] = [createUser(), createUser(), createUser()];
+      // Base course: one quiz averaging 1.0, one averaging 0.5 (a fail).
+      attemptQuiz(s1.id, createQuiz(base.course.id), 1);
+      attemptQuiz(s1.id, createQuiz(base.course.id), 0.5);
+      // Other course: one quiz with best scores 1, 0 and 0.
+      const otherQuiz = createQuiz(other.id);
+      attemptQuiz(s1.id, otherQuiz, 1);
+      attemptQuiz(s2.id, otherQuiz, 0);
+      attemptQuiz(s3.id, otherQuiz, 0);
+
+      const result = getInstructorAnalytics(base.instructor.id);
+
+      // Averaging the course figures would give 0.5417 and 0.4167.
+      expect(result.totals.quizScore).toBeCloseTo((1 + 0.5 + 1 / 3) / 3);
+      expect(result.totals.passRate).toBe(2 / 5);
+    });
+
     it("returns no courses and zero totals when the instructor has none", () => {
       const newInstructor = createUser(schema.UserRole.Instructor);
 
@@ -345,6 +459,8 @@ describe("instructorAnalyticsService", () => {
           revenueCents: 0,
           completionRate: null,
           averageProgress: null,
+          quizScore: null,
+          passRate: null,
         },
         courses: [],
       });
