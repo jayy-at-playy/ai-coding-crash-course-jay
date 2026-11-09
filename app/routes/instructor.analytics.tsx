@@ -14,12 +14,12 @@ import { Skeleton } from "~/components/ui/skeleton";
 import { AlertTriangle, BarChart3, Plus } from "lucide-react";
 import { CourseStatus } from "~/db/schema";
 import { CourseStatusBadge } from "~/components/course-status-badge";
-import { formatUsd } from "~/lib/utils";
+import { formatRate, formatUsd } from "~/lib/utils";
 
 // ─── Instructor Analytics Dashboard ───
-// All-time enrolments and revenue across every non-draft course the instructor
-// owns. The numbers come from instructorAnalyticsService and are live on every
-// load.
+// All-time enrolments, revenue, completion and progress across every
+// non-draft course the instructor owns. The numbers come from
+// instructorAnalyticsService and are live on every load.
 
 export function meta() {
   return [{ title: "Analytics — Cadence" }];
@@ -76,15 +76,28 @@ export default function InstructorAnalytics({
         </Card>
       ) : (
         <>
-          <div className="mb-8 grid gap-4 sm:grid-cols-2">
-            <StatCard label="Enrolments" value={totals.enrollments.toLocaleString("en-US")} />
+          <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              label="Enrolments"
+              value={totals.enrollments.toLocaleString("en-US")}
+            />
             <StatCard label="Revenue" value={formatUsd(totals.revenueCents)} />
+            <StatCard
+              label="Completion rate"
+              value={formatRate(totals.completionRate)}
+            />
+            <StatCard
+              label="Average progress"
+              value={formatRate(totals.averageProgress)}
+            />
           </div>
 
           <Card>
             <CardHeader>
               <CardTitle>Courses</CardTitle>
-              <CardDescription>Sorted by revenue, highest first.</CardDescription>
+              <CardDescription>
+                Sorted by revenue, highest first.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <table className="w-full text-sm">
@@ -93,6 +106,10 @@ export default function InstructorAnalytics({
                     <th className="pb-2 font-medium">Course</th>
                     <th className="pb-2 text-right font-medium">Enrolments</th>
                     <th className="pb-2 text-right font-medium">Revenue</th>
+                    <th className="pb-2 text-right font-medium">Completion</th>
+                    <th className="pb-2 text-right font-medium">
+                      Avg. progress
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -116,6 +133,12 @@ export default function InstructorAnalytics({
                       </td>
                       <td className="py-3 text-right tabular-nums">
                         {formatUsd(course.revenueCents)}
+                      </td>
+                      <td className="py-3 text-right tabular-nums">
+                        {formatRate(course.completionRate)}
+                      </td>
+                      <td className="py-3 text-right tabular-nums">
+                        {formatRate(course.averageProgress)}
                       </td>
                     </tr>
                   ))}
@@ -146,7 +169,9 @@ export function HydrateFallback() {
       <Skeleton className="mb-6 h-4 w-40" />
       <Skeleton className="mb-2 h-9 w-48" />
       <Skeleton className="mb-8 h-4 w-72" />
-      <div className="mb-8 grid gap-4 sm:grid-cols-2">
+      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Skeleton className="h-28 w-full" />
+        <Skeleton className="h-28 w-full" />
         <Skeleton className="h-28 w-full" />
         <Skeleton className="h-28 w-full" />
       </div>

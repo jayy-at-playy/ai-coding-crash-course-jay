@@ -27,6 +27,19 @@ export function formatUsd(cents: number): string {
   return usd.format(cents / 100);
 }
 
+const percent = new Intl.NumberFormat("en-US", {
+  style: "percent",
+  maximumFractionDigits: 1,
+});
+
+/**
+ * Format a 0–1 rate as a percentage — "62.5%". Null means the rate is
+ * undefined (nothing to divide by) and renders as "—", never as 0%.
+ */
+export function formatRate(rate: number | null): string {
+  return rate === null ? "—" : percent.format(rate);
+}
+
 /** Whole days between an ISO timestamp and now. Negative values clamp to 0. */
 export function daysSince(iso: string): number {
   const elapsed = Date.now() - new Date(iso).getTime();
