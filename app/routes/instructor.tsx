@@ -7,10 +7,11 @@ import { getUserById } from "~/services/userService";
 import { Card, CardContent, CardFooter, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
-import { AlertTriangle, BookOpen, GraduationCap, Plus, Users } from "lucide-react";
+import { AlertTriangle, BarChart3, BookOpen, GraduationCap, Plus, Users } from "lucide-react";
 import { CourseImage } from "~/components/course-image";
+import { CourseStatusBadge } from "~/components/course-status-badge";
 import { data, isRouteErrorResponse } from "react-router";
-import { CourseStatus, UserRole } from "~/db/schema";
+import { UserRole } from "~/db/schema";
 
 export function meta() {
   return [
@@ -57,31 +58,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   });
 
   return { courses: coursesWithStats };
-}
-
-function statusBadge(status: string) {
-  switch (status) {
-    case CourseStatus.Published:
-      return (
-        <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-400">
-          Published
-        </span>
-      );
-    case CourseStatus.Draft:
-      return (
-        <span className="inline-flex items-center rounded-full bg-yellow-100 px-2.5 py-0.5 text-xs font-medium text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">
-          Draft
-        </span>
-      );
-    case CourseStatus.Archived:
-      return (
-        <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800 dark:bg-gray-900/30 dark:text-gray-400">
-          Archived
-        </span>
-      );
-    default:
-      return null;
-  }
 }
 
 export function HydrateFallback() {
@@ -141,12 +117,20 @@ export default function InstructorDashboard({
             Manage your courses and track enrollments
           </p>
         </div>
-        <Link to="/instructor/new">
-          <Button>
-            <Plus className="mr-2 size-4" />
-            New Course
-          </Button>
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link to="/instructor/analytics">
+            <Button variant="outline">
+              <BarChart3 className="mr-2 size-4" />
+              Analytics
+            </Button>
+          </Link>
+          <Link to="/instructor/new">
+            <Button>
+              <Plus className="mr-2 size-4" />
+              New Course
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {courses.length === 0 ? (
@@ -182,7 +166,7 @@ export default function InstructorDashboard({
                   >
                     {course.title}
                   </Link>
-                  {statusBadge(course.status)}
+                  <CourseStatusBadge status={course.status} />
                 </div>
                 <p className="line-clamp-2 text-sm text-muted-foreground">
                   {course.description}
